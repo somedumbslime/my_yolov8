@@ -19,22 +19,28 @@ class Conv2d:
         self.x_padded = None
         self.X_col = None
         self.W_col = None
+        
+        self.db = None
+        self.dW = None
     
     
     def forward(self, x):
-        if x.shape[3] <= 3:
-            x = np.transpose(x, (0, 3, 1, 2))
-        
         if self.p > 0:
             x_padded = np.pad(x, pad_width=((0, 0), (0, 0), (self.p, self.p), (self.p, self.p)), mode="constant", constant_values=0)
         else:
             x_padded = x
         
         batch, c_in, h_in, w_in = x_padded.shape
-        window_shape = (batch, c_in, self.k, self.k)
         
-        windows = sliding_window_view(x_padded, window_shape)
-        windows = windows[0, 0, ::self.s, ::self.s]
+        windows = sliding_window_view(
+            x_padded,
+            (self.k, self.k),
+            axis=(2, 3)
+            )
+        
+        windows = windows[:, :, ::self.s, ::self.s, :, :]
+        # print("windows:", windows.shape)
+        windows = np.transpose(windows, (0, 2, 3, 1, 4, 5))
         
         c_out = self.W.shape[0]
         h_out = ((h_in - self.k) // self.s) + 1
@@ -63,76 +69,53 @@ class Conv2d:
         _, _, K = self.X_col.shape
         dout_col = np.transpose(dout, (0, 2, 3, 1))
         dout_col = dout_col.reshape((N, H * W, C))
-        print("x:", self.x.shape)
-        print("dout:", dout.shape)
-        print("dout_col:", dout_col.shape)
-        print("X_col:", self.X_col.shape)
-        print("W_col:", self.W_col.shape)
-        print()
-        db = np.sum(dout, axis=(0, 2, 3), keepdims=True)
-        print("db:", db.shape)
+        
+        # print("x:", self.x.shape)
+        # print("dout:", dout.dtype)
+        # print("dout_col:", dout_col.shape)
+        # print("X_col:", self.X_col.shape)
+        # print("W_col:", self.W_col.shape)
+        # print()
+        
+        db = np.sum(dout, axis=(0, 2, 3))
+        # print("db:", db.shape)
         
         dout_2d = dout_col.reshape(-1, C)
         X_col_2d = self.X_col.reshape(-1, K)
-        dw = np.dot(dout_2d.T, X_col_2d).reshape(self.c_out, self.c_in, self.k, self.k)
-        print("dw:", dw.shape)
+        dW = np.dot(dout_2d.T, X_col_2d).reshape(self.c_out, self.c_in, self.k, self.k)
+        # dW = (dW / dout_2d.shape[0]).reshape(self.c_out, self.c_in, self.k, self.k)
+        # print("dw:", dw.shape)
         
         dx_col = np.dot(dout_col, self.W_col)
-        print("dx_col:", dx_col.shape)
+        # print("dx_col:", dx_col.shape)
         
-        # =========================================================
-        # ИСПРАВЛЕННЫЙ ВЕКТОРИЗОВАННЫЙ COL2IM (ЧЕРЕЗ BINCOUNT)
-        # =========================================================
-        
-        # Шаг 1. Генерируем "линейную матрицу индексов" для одного батча картинки self.x_padded
-        # Создаем массив, где каждое значение — это просто его собственный плоский индекс (0, 1, 2...)
-        padded_shape = self.x_padded.shape
-        # Берем кусок для одного батча: (C_in, H_in, W_in)
-        flat_indices = np.arange(np.prod(padded_shape[1:])).reshape(padded_shape[1:])
-        
-        # Шаг 2. Пропускаем эти индексы через точно такой же sliding_window_view, как в forward!
-        from numpy.lib.stride_tricks import sliding_window_view
-        # Передаем окно без оси батча: (C_in, k, k)
-        window_shape_idx = (self.c_in, self.k, self.k)
-        windows_idx = sliding_window_view(flat_indices, window_shape_idx)
-        
-        # Делаем точно такой же срез со страйдом, как в вашем forward
-        windows_idx = windows_idx[0, ::self.s, ::self.s]
-        
-        # Разворачиваем индексы в точно такую же структуру, какую имел X_col для одного батча
-        # Размерность будет: (H_out * W_out, C_in * k * k)
-        X_col_indices_single = windows_idx.reshape(H * W, self.c_in * self.k * self.k)
-        
-        # Шаг 3. Размножаем эти индексы для всех батчей (N) со смещением по памяти
-        # Каждый следующий батч смещен в плоском массиве на размер одного батча
-        batch_offset = np.prod(padded_shape[1:])
-        X_col_indices = np.zeros_like(dx_col, dtype=np.int64)
-        for i in range(N):
-            X_col_indices[i] = X_col_indices_single + i * batch_offset
-            
-        # Шаг 4. Суммируем дублирующиеся пиксели в один плоский массив градиентов
-        # np.bincount(куда_складывать, что_складывать, minlength=общий_размер)
-        dx_padded_flat = np.bincount(
-            X_col_indices.ravel(), 
-            weights=dx_col.ravel(), 
-            minlength=self.x_padded.size
-        )
-        
-        # Восстанавливаем исходную padded форму тензора
-        dx_padded = dx_padded_flat.reshape(padded_shape)
+        dx_windows = dx_col.reshape(N, H, W, self.c_in, self.k, self.k)
+        dx_padded = np.zeros_like(self.x_padded, dtype=np.float64)
+        # print("dx_paded: ", dx_padded.dtype) 
+        for ki in range(self.k):
+            for kj in range(self.k):
+                dx_padded[
+                    :,
+                    :,
+                    ki: ki + H * self.s : self.s,
+                    kj: kj + W * self.s : self.s
+                ] += dx_windows[:, :, :, :, ki, kj].transpose(0, 3, 1, 2)
         
         # 3. Срезаем padding, возвращая чистый dX формы исходного self.x
         if self.p > 0:
             dx = dx_padded[:, :, self.p:-self.p, self.p:-self.p]
         else:
             dx = dx_padded
-            
-        print("dx:", dx.shape)
+        
+        self.db = db
+        self.dW = dW
+        
+        # print("dx:", dx.shape)
         return dx
 
 
 class BatchNorm2d:
-    def __init__(self, num_features=64, training=False, eps=0.00001):
+    def __init__(self, num_features=64, training=True, eps=0.00001):
         self.gamma = np.ones((1, num_features, 1, 1))
         self.beta = np.zeros((1, num_features, 1, 1))
         
@@ -196,7 +179,7 @@ class BatchNorm2d:
         dx_2 = dmu / M
 
         dx = dx_1 + dx_2
-        print("bn dx:", dx.shape)
+        # print("bn dx:", dx.shape)
         return dx
 
 class SiLU:  
@@ -204,6 +187,7 @@ class SiLU:
         self.x = None
         
     def forward(self, x):
+        # x_clipped = np.clip(x, -50, 50)
         self.x = x
         sigm = 1 / (1 + np.exp(-x))
         y = x * sigm
@@ -212,8 +196,8 @@ class SiLU:
     
     def backward(self, dout):
         sigm = 1 / (1 + np.exp(-self.x))
-        local_grad = sigm + self.x * sigm * (1 - sigm)
-        dx = dout * local_grad
+        local_derivative = sigm + self.x * sigm * (1 - sigm)
+        dx = dout * local_derivative
         
         return dx
 
@@ -242,19 +226,49 @@ class CBS:
         self.conv = Conv2d(c_in, c_out, k=3, s=2, p=1)
         self.bn = BatchNorm2d(c_out)
         self.act = SiLU()
-        self.mse = MSE()
         self.y = None
         
-    def forward(self, x, t):
+    def forward(self, x):
         y = self.act.forward(self.bn.forward(self.conv.forward(x)))
-        y = self.mse.forward(y, t)
-        
         self.y = y
         
         return y
     
-    def backward(self, y):
-        self.act.backward()
-
-
-        return y
+    def backward(self, grad_loss):
+        dx_silu = self.act.backward(grad_loss)
+        dx_bn = self.bn.backward(dx_silu)
+        dx_conv = self.conv.backward(dx_bn)
+        
+        return None
+    
+    
+class SGD:
+    def __init__(self, lr=0.001):
+        self.lr = lr
+    
+    def step(self, block):
+        if type(block) == (CBS):
+        # BatchNorm2d
+            block.bn.gamma = block.bn.gamma - block.bn.dgamma * self.lr
+            block.bn.beta = block.bn.beta - block.bn.dbeta * self.lr
+            # Conv
+            block.conv.b = block.conv.b - block.conv.db * self.lr
+            block.conv.W = block.conv.W - block.conv.dW * self.lr
+        
+        if type(block) == (Conv2d):
+            block.b = block.b - block.db * self.lr
+            block.W = block.W - block.dW * self.lr
+        return None
+        
+    def zero_grad(self, block):
+        if type(block) == (CBS):
+            # BatchNorm2d
+            block.bn.dgamma = np.zeros_like(block.bn.dgamma)
+            block.bn.dbeta = np.zeros_like(block.bn.dbeta)
+            # Conv
+            block.conv.db = np.zeros_like(block.conv.db)
+            block.conv.dW = np.zeros_like(block.conv.dW)
+            
+        if type(block) == (Conv2d):
+            block.db = np.zeros_like(block.db)
+            block.dW = np.zeros_like(block.dW)

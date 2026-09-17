@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from blocks import Conv2d, BatchNorm2d, SiLU, MSE
+from blocks import Conv2d, BatchNorm2d, SiLU, MSE, CBS, SGD
 
 
 
@@ -8,6 +8,7 @@ path = r"C:\Users\sanek\OneDrive\Рабочий стол\projects\rt_yolo_game\d
 file_bytes = np.fromfile(path, dtype=np.uint8)
 test_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 test_image = np.expand_dims(test_image, axis=0)
+test_image = np.transpose(test_image, (0, 3, 1, 2))
 
 # LABEL mask for this photo
 x_min, y_min = 305, 300
@@ -43,6 +44,8 @@ act3  = SiLU()
 
 mse = MSE()
 
+optim = SGD()
+
 output1 = conv1.forward(test_image) # conv ->  batchnorm -> act (SiLU) | currently only "conv"
 output_norm1 = bn1.forward(output1)
 output_act1 = act1.forward(output_norm1)
@@ -70,6 +73,9 @@ output_norm3_b = bn3.backward(output_act3_b)
 
 output_conv3_b = conv3.backward(output_norm3_b)
 # print("output_conv3_b:", output_conv3_b.shape)
+
+optim.step()
+
 
 # output_act1 = output_act1
 # output_act2 = output_act2
