@@ -21,7 +21,7 @@ class Dataset:
         self.__unpack__()
         
     def __len__(self):
-        # костыль
+        # костиль
         if len(self.images_train) == len(self.labels_train):
             self.length_train = len(self.images_train)
         

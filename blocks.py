@@ -101,7 +101,6 @@ class Conv2d:
                     kj: kj + W * self.s : self.s
                 ] += dx_windows[:, :, :, :, ki, kj].transpose(0, 3, 1, 2)
         
-        # 3. Срезаем padding, возвращая чистый dX формы исходного self.x
         if self.p > 0:
             dx = dx_padded[:, :, self.p:-self.p, self.p:-self.p]
         else:
