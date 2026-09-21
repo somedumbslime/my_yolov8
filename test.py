@@ -5,7 +5,10 @@ from blocks import Conv2d, BatchNorm2d, SiLU, MSE, CBS, SGD
 
 
 path = r"C:\Users\sanek\OneDrive\Рабочий стол\projects\rt_yolo_game\data\video_2025-05-27_13-49-46_frame_003.jpg"
-file_bytes = np.fromfile(path, dtype=np.uint8)
+img_name = "images_003887_x760_y0.jpg"
+img = f"C:\\Users\\sanek\\OneDrive\\Рабочий стол\\projects\\rt_yolo_game\\data\\learning_mini_1000_v1\\learning_mini_1000_v1\\images\\{img_name}"
+
+file_bytes = np.fromfile(img, dtype=np.uint8)
 test_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 test_image = np.expand_dims(test_image, axis=0)
 test_image = np.transpose(test_image, (0, 3, 1, 2))
@@ -74,7 +77,7 @@ output_norm3_b = bn3.backward(output_act3_b)
 output_conv3_b = conv3.backward(output_norm3_b)
 # print("output_conv3_b:", output_conv3_b.shape)
 
-optim.step()
+optim.step(output3)
 
 
 # output_act1 = output_act1
