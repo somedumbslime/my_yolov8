@@ -222,7 +222,7 @@ class MSE:
 
 class CBS:
     def __init__(self, c_in, c_out, k=3, s=2, p=1):
-        self.conv = Conv2d(c_in, c_out, k=3, s=2, p=1)
+        self.conv = Conv2d(c_in, c_out, k, s, p)
         self.bn = BatchNorm2d(c_out)
         self.act = SiLU()
         self.y = None

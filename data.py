@@ -37,7 +37,27 @@ class Dataset:
     
     def __unpack__(self):
         self.images_train = [cv2.resize(cv2.imdecode(np.fromfile(x, dtype=np.uint8), cv2.IMREAD_COLOR), (640, 640)) for x in self.images_train]
+        self.labels_train = self.unpack_labels(self.labels_train)
         
+    def unpack_labels(self, labels_list):
+        labels = []
+        
+        for label in labels_list:
+            with open(label, "r", encoding="utf-8") as file:
+                line = [x.strip("\n").split(" ", maxsplit=1) for x in file.readlines()]
+                for i in range(len(line)):
+                    a, b = line[i]
+                    a = int(a)
+                    b = [float(x) for x in b.split()]
+                    line[i] = [a, b]
+                    # print(line[i])
+                    
+                             
+                # print(line)
+                labels.append(line)
+        
+        return labels
+    
     
 class Dataloader:
     def __init__(self, dataset, batch_size):
@@ -52,7 +72,33 @@ class Dataloader:
         
         self.cur_idx  = 0
         
+    @staticmethod
+    def load_labels(labels):
+        labels_ready = []
+        for b in range(len(labels)):
+            classes = []
+            boxes = []
+            box_arr = np.zeros((640, 640))
+            for label in labels[b]:
+                cls, box = label
+                x, y, w, h = [min(round(x*640), 640) for x in box]
+                x = x - w // 2
+                y = y - h // 2
+                box_arr[y: y+h, x:x+w] = 1
+                classes.append(cls)
+            boxes.append(box_arr)
+                
+            labels_ready.append([classes, boxes])
+        
+        return labels_ready
+
     def load_batch(self, split):
         for batch in range(self.num_batches[split]):
-            yield self.data.images_train[self.cur_idx:self.cur_idx+self.batch_size], self.data.labels_train[self.cur_idx:self.cur_idx+self.batch_size]
+            # костиль
+            images = self.data.images_train[self.cur_idx:self.cur_idx+self.batch_size]
+            images = np.transpose(np.array(images), (0, 3, 1, 2))
+            labels = self.data.labels_train[self.cur_idx:self.cur_idx+self.batch_size]
+            labels = self.load_labels(labels)
+                
+            yield images, labels
             self.cur_idx = self.cur_idx + self.batch_size
